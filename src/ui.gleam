@@ -2,10 +2,9 @@
 
 import formal/form
 import gleam/dynamic/decode.{type Decoder, type Dynamic}
-import gleam/io
+import gleam/javascript/promise.{type Promise}
 import gleam/json
 import gleam/option
-import gleam/result
 import gleam/uri.{type Uri}
 import lustre
 import lustre/attribute
@@ -129,14 +128,19 @@ pub fn decode_register_data(
 pub fn user_decoder() -> Decoder(User) {
   use username <- decode.field("username", decode.string)
   use email <- decode.field("email", decode.string)
-  use access_token <- decode.field("access_token", decode.string)
-  use refresh_token <- decode.field("refresh_token", decode.string)
-  decode.success(User(username:, email:, access_token:, refresh_token:))
+  decode.success(User(username:, email:, access_token: "", refresh_token: ""))
 }
 
 pub fn user_register_decoder() -> Decoder(String) {
   use id <- decode.field("userId", decode.string)
   decode.success(id)
+}
+
+pub fn user_login_decoder() -> Decoder(User) {
+  use user <- decode.field("user", user_decoder())
+  use access_token <- decode.field("accessToken", decode.string)
+  use refresh_token <- decode.field("refreshToken", decode.string)
+  decode.success(User(..user, access_token:, refresh_token:))
 }
 
 pub type Route {
@@ -180,6 +184,7 @@ pub type Msg {
   UserNavigatedTo(Route)
   AppRouteInitialized(Route)
   ApiUserRegistered(Result(String, rsvp.Error))
+  ApiUserLoggedIn(Result(User, rsvp.Error))
   UserSubmittedLogin(List(#(String, String)))
   UserSubmittedRegister(List(#(String, String)))
   UserLoggedOut
@@ -254,26 +259,68 @@ fn update(model: Model, msg: Msg) -> #(Model, effect.Effect(Msg)) {
         effect.none(),
       )
     }
-    UserSubmittedLogin(data) -> {
-      case decode_login_data(data) {
-        Ok(LoginData(email, _)) -> {
-          // set_localstorage_user(User(email, "test", "test"))
+    ApiUserLoggedIn(Ok(user)) -> {
+      echo "User logged in: " <> user.username
+      set_localstorage_user(user.access_token, user.refresh_token)
 
+      #(App(route: Dashboard, auth: Authenticated(user)), effect.none())
+    }
+    ApiUserLoggedIn(Error(err)) -> {
+      echo err
+
+      let assert Unauthenticated(forms) = model.auth
+      let error = case err {
+        rsvp.HttpError(response) -> {
+          case response.body |> json.parse(api_error_decoder()) {
+            Ok(ApiError(message)) -> {
+              message
+            }
+            Error(_) -> {
+              "something went wrong, try again later"
+            }
+          }
+        }
+        _ -> {
+          "something went wrong, try again later"
+        }
+      }
+
+      #(
+        App(
+          ..model,
+          auth: Unauthenticated(
+            UnauthenticatedForms(
+              ..forms,
+              login: Form(
+                ..forms.login,
+                loading: False,
+                error: option.Some(error),
+              ),
+            ),
+          ),
+        ),
+        effect.none(),
+      )
+    }
+    UserSubmittedLogin(data) -> {
+      let assert Unauthenticated(forms) = model.auth
+
+      case decode_login_data(data) {
+        Ok(LoginData(email, password)) -> {
           #(
             App(
-              route: Dashboard,
-              auth: Authenticated(User(
-                username: "test",
-                email: "test",
-                access_token: "test",
-                refresh_token: "test",
-              )),
+              ..model,
+              auth: Unauthenticated(
+                UnauthenticatedForms(
+                  ..forms,
+                  login: Form(..forms.login, loading: True, error: option.None),
+                ),
+              ),
             ),
-            effect.none(),
+            login_user(email, password, ApiUserLoggedIn),
           )
         }
         Error(form) -> {
-          let assert Unauthenticated(forms) = model.auth
           #(
             App(
               ..model,
@@ -385,17 +432,28 @@ fn init_route() -> effect.Effect(Msg) {
 }
 
 fn get_user() -> effect.Effect(Msg) {
-  use dispatch <- effect.from()
+  effect.from(do_get_user)
+}
 
-  let result =
-    result.try(get_localstorage_user(), fn(dyn) {
-      case decode.run(dyn, user_decoder()) {
-        Ok(user) -> Ok(user)
-        Error(_) -> Error(Nil)
+fn do_get_user(dispatch: fn(Msg) -> Nil) -> Nil {
+  get_localstorage_user()
+  |> promise.map(fn(response) {
+    case response {
+      Ok(dyn) -> {
+        case decode.run(dyn, user_login_decoder()) {
+          Ok(user) -> LocalStorageReturnedUser(Ok(user))
+          Error(err) -> {
+            echo err
+            LocalStorageReturnedUser(Error(Nil))
+          }
+        }
       }
-    })
+      Error(Nil) -> LocalStorageReturnedUser(Error(Nil))
+    }
+  })
+  |> promise.tap(dispatch)
 
-  dispatch(LocalStorageReturnedUser(result))
+  Nil
 }
 
 fn register_user(
@@ -415,20 +473,20 @@ fn register_user(
   rsvp.post("http://localhost:8080/api/v1/auth/register", body, handler)
 }
 
-// fn login_user(
-//   email: String,
-//   password: String,
-//   on_response handle_response: fn(Result(String, rsvp.Error)) -> Msg,
-// ) -> effect.Effect(Msg) {
-//   let handler = rsvp.expect_json(user_login_decoder(), handle_response)
-//   let body =
-//     json.object([
-//       #("email", json.string(email)),
-//       #("password", json.string(password)),
-//     ])
+fn login_user(
+  email: String,
+  password: String,
+  on_response handle_response: fn(Result(User, rsvp.Error)) -> Msg,
+) -> effect.Effect(Msg) {
+  let handler = rsvp.expect_json(user_login_decoder(), handle_response)
+  let body =
+    json.object([
+      #("email", json.string(email)),
+      #("password", json.string(password)),
+    ])
 
-//   rsvp.post("http://localhost:8080/api/v1/auth/login", body, handler)
-// }
+  rsvp.post("http://localhost:8080/api/v1/auth/login", body, handler)
+}
 
 // VIEW -----------------------------------------------------------------------
 
@@ -543,10 +601,10 @@ fn view_input(
 // EXTERNAL -------------------------------------------------------------------
 
 @external(javascript, "./ffi.mjs", "get_localstorage_user")
-fn get_localstorage_user() -> Result(Dynamic, Nil)
+fn get_localstorage_user() -> Promise(Result(Dynamic, Nil))
 
 @external(javascript, "./ffi.mjs", "set_localstorage_user")
-fn set_localstorage_user(user: User) -> Nil
+fn set_localstorage_user(access_token: String, refresh_token: String) -> Nil
 
 @external(javascript, "./ffi.mjs", "remove_localstorage_user")
 fn remove_localstorage_user() -> Nil
