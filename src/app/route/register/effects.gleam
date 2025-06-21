@@ -1,10 +1,10 @@
-import app/data/constants.{api_url}
 import gleam/dynamic/decode
 import gleam/json
 import lustre/effect
 import rsvp
 
 pub fn register_user_effect(
+  api_url: String,
   username: String,
   email: String,
   password: String,

@@ -1,6 +1,5 @@
 import app/api/decoders
 import app/data/auth
-import app/data/constants.{api_url}
 import gleam/dynamic/decode
 import gleam/http
 import gleam/http/request
@@ -8,7 +7,15 @@ import gleam/json
 import lustre/effect
 import rsvp
 
+pub fn with_access_token(
+  request: request.Request(a),
+  access_token: String,
+) -> request.Request(a) {
+  request.set_header(request, "Authorization", "Bearer " <> access_token)
+}
+
 pub fn fetch_user_info(
+  api_url: String,
   access_token: String,
   on_response handle_response: fn(Result(auth.User, rsvp.Error)) -> msg,
 ) -> effect.Effect(msg) {
@@ -22,11 +29,12 @@ pub fn fetch_user_info(
 
   request
   |> request.set_method(http.Get)
-  |> request.set_header("Authorization", "Bearer " <> access_token)
+  |> with_access_token(access_token)
   |> rsvp.send(handler)
 }
 
 pub fn refresh_access_token(
+  api_url: String,
   refresh_token: String,
   on_response handle_response: fn(Result(String, rsvp.Error)) -> msg,
 ) -> effect.Effect(msg) {

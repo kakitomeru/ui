@@ -40,6 +40,9 @@ pub fn route_to_path(route: Route) -> String {
   }
 }
 
+/// Ensures that user can't navigate to a route that they're not allowed to.
+/// For example, a user can't navigate to the login page if they're already
+/// authenticated.
 pub fn determine_allowed_route(
   auth_status: auth.Status,
   attempted_route: Route,

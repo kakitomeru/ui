@@ -33,6 +33,7 @@ pub type OutMsg {
 pub fn update(
   model: Model,
   msg: Msg,
+  api_url: String,
 ) -> #(Model, effect.Effect(Msg), option.Option(OutMsg)) {
   case msg {
     UserSubmittedLogin(inputs) -> {
@@ -43,7 +44,7 @@ pub fn update(
 
           let new_model = Model(login_form: new_login_form)
           let effect =
-            effects.login_user_effect(email, password, ApiUserLoggedIn)
+            effects.login_user_effect(api_url, email, password, ApiUserLoggedIn)
 
           #(new_model, effect, None)
         }

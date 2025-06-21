@@ -29,3 +29,15 @@ export function remove_tokens() {
   window.localStorage.removeItem("accessToken")
   window.localStorage.removeItem("refreshToken")
 }
+
+export function console_group(message) {
+  console.group(message)
+}
+
+export function console_group_end() {
+  console.groupEnd()
+}
+
+export function console_group_collapsed(message) {
+  console.groupCollapsed(message)
+}

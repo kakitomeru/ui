@@ -32,6 +32,7 @@ pub type OutMsg {
 pub fn update(
   model: Model,
   msg: Msg,
+  api_url: String,
 ) -> #(Model, effect.Effect(Msg), option.Option(OutMsg)) {
   case msg {
     UserSubmittedRegister(inputs) -> {
@@ -43,6 +44,7 @@ pub fn update(
           let new_model = Model(register_form: new_register_form)
           let effect =
             effects.register_user_effect(
+              api_url,
               username,
               email,
               password,
